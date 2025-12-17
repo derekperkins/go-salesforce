@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/spf13/afero"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type bulkJobCreationRequest struct {
@@ -200,11 +199,10 @@ func waitForJobResultsAsync(
 	interval time.Duration,
 	c chan error,
 ) {
-	err := wait.PollUntilContextTimeout(
+	err := pollUntilContextTimeout(
 		context.Background(),
 		interval,
 		time.Minute,
-		false,
 		func(context.Context) (bool, error) {
 			bulkJob, reqErr := getJobResults(sf, jobType, bulkJobId)
 			if reqErr != nil {
@@ -222,11 +220,10 @@ func waitForJobResults(
 	jobType string,
 	interval time.Duration,
 ) error {
-	err := wait.PollUntilContextTimeout(
+	err := pollUntilContextTimeout(
 		context.Background(),
 		interval,
 		time.Minute,
-		false,
 		func(context.Context) (bool, error) {
 			bulkJob, reqErr := getJobResults(sf, jobType, bulkJobId)
 			if reqErr != nil {
@@ -236,6 +233,35 @@ func waitForJobResults(
 		},
 	)
 	return err
+}
+
+func pollUntilContextTimeout(
+	ctx context.Context,
+	interval time.Duration,
+	timeout time.Duration,
+	checkFn func(context.Context) (bool, error),
+) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case <-ticker.C:
+			done, err := checkFn(ctx)
+			if err != nil {
+				return err
+			}
+			if done {
+				return nil
+			}
+		}
+	}
 }
 
 func isBulkJobDone(bulkJob BulkJobResults) (bool, error) {
